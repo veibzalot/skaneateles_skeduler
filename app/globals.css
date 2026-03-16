@@ -116,6 +116,13 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* Lake color tokens */
+@theme inline {
+  --color-lake: #0369a1;       /* sky-700 — deep lake blue */
+  --color-lake-dark: #075985;  /* sky-800 */
+  --color-lake-light: #e0f2fe; /* sky-100 */
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -127,3 +134,12 @@
     @apply font-sans;
   }
 }
+
+/* Utility classes for lake brand colors */
+.bg-lake       { background-color: #0369a1; }
+.bg-lake-dark  { background-color: #075985; }
+.bg-lake-light { background-color: #e0f2fe; }
+.text-lake     { color: #0369a1; }
+.text-lake-dark{ color: #075985; }
+.hover\:bg-lake-dark:hover { background-color: #075985; }
+.border-lake   { border-color: #0369a1; }
