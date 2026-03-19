@@ -1,39 +1,54 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAdminAuthenticated } from "@/lib/auth";
 import { db } from "@/db";
-import { dates, signups } from "@/db/schema";
-import { asc } from "drizzle-orm";
+import { reservations, confirmedDays } from "@/db/schema";
+import { asc, inArray } from "drizzle-orm";
 
 export async function GET(req: NextRequest) {
   const ok = await isAdminAuthenticated();
   if (!ok) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const allDates = await db.select().from(dates).orderBy(asc(dates.date));
-  const allSignups = await db.select().from(signups).orderBy(asc(signups.dateId), asc(signups.status), asc(signups.position));
+  const allReservations = await db.select().from(reservations).orderBy(asc(reservations.startDate));
+  const resIds = allReservations.map((r) => r.id);
+  const allConfirmed = resIds.length
+    ? await db.select().from(confirmedDays).where(inArray(confirmedDays.reservationId, resIds))
+    : [];
 
-  const dateMap = new Map(allDates.map((d) => [d.id, d]));
+  const confirmedByRes = new Map<string, string[]>();
+  for (const cd of allConfirmed) {
+    if (!confirmedByRes.has(cd.reservationId)) confirmedByRes.set(cd.reservationId, []);
+    confirmedByRes.get(cd.reservationId)!.push(cd.date);
+  }
 
-  const rows = allSignups.map((s) => {
-    const d = dateMap.get(s.dateId);
+  const rows = allReservations.map((r) => {
+    const confirmed = confirmedByRes.get(r.id) ?? [];
+    const totalNights = Math.round(
+      (new Date(r.endDate).getTime() - new Date(r.startDate).getTime()) / 86_400_000
+    );
+    const status =
+      confirmed.length === 0 ? "pending" : confirmed.length === totalNights ? "confirmed" : "partial";
     return [
-      d?.date ?? "",
-      d?.label ?? "",
-      s.name,
-      s.partySize,
-      s.status,
-      s.position,
-      s.email ?? "",
-      s.createdAt.toISOString(),
+      r.name,
+      r.email ?? "",
+      r.partySize,
+      r.startDate,
+      r.endDate,
+      totalNights,
+      status,
+      confirmed.sort().join("; "),
+      r.createdAt.toISOString(),
     ];
   });
 
-  const header = ["Date", "Label", "Name", "Party Size", "Status", "Position", "Email", "Signed Up At"];
-  const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const header = ["Name", "Email", "Party Size", "Check-In", "Checkout", "Nights", "Status", "Confirmed Nights", "Requested At"];
+  const csv = [header, ...rows]
+    .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
+    .join("\n");
 
   return new NextResponse(csv, {
     headers: {
       "Content-Type": "text/csv",
-      "Content-Disposition": `attachment; filename="signups-${new Date().toISOString().slice(0, 10)}.csv"`,
+      "Content-Disposition": `attachment; filename="reservations-${new Date().toISOString().slice(0, 10)}.csv"`,
     },
   });
 }
