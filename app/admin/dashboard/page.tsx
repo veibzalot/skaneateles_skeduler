@@ -1,11 +1,9 @@
 import { db } from "@/db";
-import { dates, signups } from "@/db/schema";
-import { asc, inArray, sql } from "drizzle-orm";
+import { capacityOverrides, reservations, confirmedDays } from "@/db/schema";
+import { inArray } from "drizzle-orm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import AddDateForm from "@/components/admin/AddDateForm";
-import DateManager from "@/components/admin/DateManager";
-import SignupTable from "@/components/admin/SignupTable";
+import ReservationList from "@/components/admin/ReservationList";
+import CapacityOverrideForm from "@/components/admin/CapacityOverrideForm";
 import Link from "next/link";
 import { clearAdminCookie } from "@/lib/auth";
 import { redirect } from "next/navigation";
@@ -19,49 +17,29 @@ async function handleLogout() {
 }
 
 export default async function AdminDashboard() {
-  const allDates = await db.select().from(dates).orderBy(asc(dates.date));
+  const allReservations = await db.select().from(reservations);
+  const allOverrides = await db.select().from(capacityOverrides);
 
-  const dateIds = allDates.map((d) => d.id);
+  const resIds = allReservations.map((r) => r.id);
+  const allConfirmedDays =
+    resIds.length > 0
+      ? await db.select().from(confirmedDays).where(inArray(confirmedDays.reservationId, resIds))
+      : [];
 
-  const allSignups = dateIds.length
-    ? await db.select().from(signups).where(inArray(signups.dateId, dateIds)).orderBy(asc(signups.dateId), asc(signups.status), asc(signups.position))
-    : [];
-
-  // Count confirmed people and waitlist entries per date
-  const confirmedCountByDate = new Map<string, number>();
-  const waitlistCountByDate = new Map<string, number>();
-  for (const s of allSignups) {
-    if (s.status === "confirmed") {
-      confirmedCountByDate.set(s.dateId, (confirmedCountByDate.get(s.dateId) ?? 0) + s.partySize);
-    } else {
-      waitlistCountByDate.set(s.dateId, (waitlistCountByDate.get(s.dateId) ?? 0) + 1);
-    }
-  }
-
-  const datesWithCounts = allDates.map((d) => ({
-    ...d,
-    confirmedCount: confirmedCountByDate.get(d.id) ?? 0,
-    waitlistCount: waitlistCountByDate.get(d.id) ?? 0,
-  }));
-
-  const totalConfirmed = allSignups.filter((s) => s.status === "confirmed").reduce((sum, s) => sum + s.partySize, 0);
-  const totalWaitlisted = allSignups.filter((s) => s.status === "waitlisted").length;
+  const pendingCount = allReservations.filter((r) => {
+    const confirmed = new Set(allConfirmedDays.filter((cd) => cd.reservationId === r.id).map((cd) => cd.date));
+    return confirmed.size === 0;
+  }).length;
 
   return (
     <div className="min-h-screen bg-sky-50">
-      <header className="bg-lake text-white shadow-md">
-        <div className="max-w-5xl mx-auto px-4 py-5 flex items-center justify-between">
+      <header className="bg-sky-700 text-white shadow-md">
+        <div className="max-w-4xl mx-auto px-4 py-5 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold">Admin Dashboard</h1>
-            <p className="text-sky-100 text-sm mt-0.5">Skaneateles Lake House</p>
+            <p className="text-sky-200 text-sm mt-0.5">Skaneateles Lake House</p>
           </div>
-          <div className="flex gap-3 items-center">
-            <Link
-              href="/api/admin/export"
-              className="text-sm bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-md border border-white/20 transition-colors"
-            >
-              Export CSV
-            </Link>
+          <div className="flex gap-4 items-center">
             <Link href="/" className="text-sm text-sky-200 hover:text-white transition-colors">
               View Public →
             </Link>
@@ -74,56 +52,52 @@ export default async function AdminDashboard() {
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 py-8 space-y-8">
+      <main className="max-w-4xl mx-auto px-4 py-8 space-y-8">
         {/* Stats */}
         <div className="grid grid-cols-3 gap-4">
           <Card className="border-stone-200">
             <CardContent className="pt-5">
-              <p className="text-sm text-stone-500">Available Dates</p>
-              <p className="text-3xl font-bold text-lake-dark mt-1">{allDates.length}</p>
+              <p className="text-sm text-stone-500">Total Requests</p>
+              <p className="text-3xl font-bold text-stone-800 mt-1">{allReservations.length}</p>
             </CardContent>
           </Card>
           <Card className="border-stone-200">
             <CardContent className="pt-5">
-              <p className="text-sm text-stone-500">Confirmed People</p>
-              <p className="text-3xl font-bold text-green-700 mt-1">{totalConfirmed}</p>
+              <p className="text-sm text-stone-500">Pending (unconfirmed)</p>
+              <p className="text-3xl font-bold text-amber-600 mt-1">{pendingCount}</p>
             </CardContent>
           </Card>
           <Card className="border-stone-200">
             <CardContent className="pt-5">
-              <p className="text-sm text-stone-500">On Waitlist</p>
-              <p className="text-3xl font-bold text-amber-600 mt-1">{totalWaitlisted}</p>
+              <p className="text-sm text-stone-500">Capacity Overrides</p>
+              <p className="text-3xl font-bold text-sky-700 mt-1">{allOverrides.length}</p>
             </CardContent>
           </Card>
         </div>
 
-        {/* Add date */}
+        {/* Reservation requests */}
         <Card className="border-stone-200">
           <CardHeader>
-            <CardTitle className="text-lake-dark text-lg">Add a Date</CardTitle>
+            <CardTitle className="text-sky-800 text-lg">Reservation Requests</CardTitle>
+            <p className="text-sm text-stone-500">
+              Click individual night buttons to confirm or unconfirm them. Green = confirmed.
+            </p>
           </CardHeader>
           <CardContent>
-            <AddDateForm />
+            <ReservationList reservations={allReservations} confirmedDays={allConfirmedDays} />
           </CardContent>
         </Card>
 
-        {/* Date list */}
+        {/* Capacity overrides */}
         <Card className="border-stone-200">
           <CardHeader>
-            <CardTitle className="text-lake-dark text-lg">Manage Dates</CardTitle>
+            <CardTitle className="text-sky-800 text-lg">Capacity Overrides</CardTitle>
+            <p className="text-sm text-stone-500">
+              Reduce or close specific dates. All other dates default to 12 slots.
+            </p>
           </CardHeader>
-          <CardContent className="overflow-x-auto">
-            <DateManager dates={datesWithCounts} />
-          </CardContent>
-        </Card>
-
-        {/* All signups */}
-        <Card className="border-stone-200">
-          <CardHeader>
-            <CardTitle className="text-lake-dark text-lg">All Signups</CardTitle>
-          </CardHeader>
-          <CardContent className="overflow-x-auto">
-            <SignupTable dates={allDates} signups={allSignups} />
+          <CardContent>
+            <CapacityOverrideForm overrides={allOverrides} />
           </CardContent>
         </Card>
       </main>
